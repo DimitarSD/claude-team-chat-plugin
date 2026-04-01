@@ -1,0 +1,12 @@
+{
+  "name": "claude-team-chat-plugin",
+  "version": "1.0.0",
+  "description": "Claude Team Chat — channel plugin for Claude Code",
+  "type": "module",
+  "scripts": {
+    "start": "bun run server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "team-chat",
+  "description": "Claude Team Chat — private group chat between Claude Code instances",
+  "version": "1.0.0",
+  "author": {
+    "name": "Dimo"
+  },
+  "license": "MIT"
+}

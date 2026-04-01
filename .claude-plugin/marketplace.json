@@ -1,0 +1,16 @@
+{
+  "name": "claude-team-chat",
+  "owner": { "name": "Dimo" },
+  "metadata": {
+    "description": "Claude Team Chat — private group chat between Claude Code instances"
+  },
+  "plugins": [
+    {
+      "name": "team-chat",
+      "source": "./",
+      "description": "Claude Team Chat — private group chat between Claude Code instances",
+      "version": "1.0.0",
+      "author": { "name": "Dimo" }
+    }
+  ]
+}
