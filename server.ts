@@ -11,7 +11,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -78,10 +78,10 @@ const mcp = new Server(
       experimental: { "claude/channel": {} },
     },
     instructions:
-      `Messages from the team chat arrive as <channel source="team-chat" sender="..." message_id="...">. ` +
-      `These are messages from other Claude Code instances belonging to your teammates. ` +
-      `Use the reply tool to send messages to the team chat. Be collaborative and constructive. ` +
-      `Only reply when you have something valuable to add — don't respond to every message.`,
+      `You are part of a private AI-to-AI team chat. Messages from other Claude instances arrive as <channel source="team-chat" sender="..." message_id="...">. ` +
+      `Use "whoami" to see your identity and team. Use "team_members" to see who else is in the chat. ` +
+      `Use "reply" to send messages and "check_team_chat" to read recent history. ` +
+      `Be collaborative and constructive. Only reply when you have something valuable to add.`,
   }
 );
 
@@ -114,6 +114,36 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             description: "Number of messages to fetch (default: 20, max: 50)",
           },
         },
+      },
+    },
+    {
+      name: "whoami",
+      description: "Show your identity in the team chat — your name, owner, team, and what this chat is about",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      name: "team_members",
+      description: "List all members (AI assistants) in the team chat",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      name: "setup_team_chat",
+      description: "Join a team and configure the plugin. Use this when the user gives you an invite code and server URL to set up team chat.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          serverUrl: { type: "string", description: "The team chat server URL (e.g. https://team-chat.example.com)" },
+          inviteCode: { type: "string", description: "The invite code to join the team (e.g. ABCD1234)" },
+          memberName: { type: "string", description: "Name for this Claude instance (e.g. Opus, Sonnet)" },
+          ownerName: { type: "string", description: "Name of the human owner (e.g. Alex, Dimitar)" },
+        },
+        required: ["serverUrl", "inviteCode", "memberName", "ownerName"],
       },
     },
   ],
@@ -159,6 +189,102 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: "text", text: formatted }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Failed to fetch messages: ${err}` }] };
+    }
+  }
+
+  if (req.params.name === "whoami" || req.params.name === "team_members") {
+    try {
+      const data = await apiGet("/me");
+      if (req.params.name === "whoami") {
+        const others = data.members.filter((m: any) => m.id !== data.me.id);
+        const othersList = others.map((m: any) => {
+          const owner = m.ownerName ? ` [${m.ownerName}]` : "";
+          return `  - ${m.name}${owner}`;
+        }).join("\n");
+
+        return {
+          content: [{
+            type: "text",
+            text: `You are ${data.me.name}${data.me.ownerName ? ` [${data.me.ownerName}]` : ""}\n` +
+              `Team: ${data.team.name}\n` +
+              `Team ID: ${data.team.id}\n\n` +
+              `This is a private AI-to-AI team chat. You communicate with other Claude instances belonging to your teammates.\n\n` +
+              `Other members in the chat:\n${othersList || "  (no other members yet)"}`,
+          }],
+        };
+      } else {
+        const membersList = data.members.map((m: any) => {
+          const owner = m.ownerName ? ` [${m.ownerName}]` : "";
+          const isYou = m.id === data.me.id ? " (you)" : "";
+          return `- ${m.name}${owner}${isYou}`;
+        }).join("\n");
+
+        return {
+          content: [{
+            type: "text",
+            text: `Team: ${data.team.name}\n\nMembers:\n${membersList}`,
+          }],
+        };
+      }
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed to fetch info: ${err}` }] };
+    }
+  }
+
+  if (req.params.name === "setup_team_chat") {
+    const { serverUrl, inviteCode, memberName, ownerName } = req.params.arguments as {
+      serverUrl: string;
+      inviteCode: string;
+      memberName: string;
+      ownerName: string;
+    };
+
+    try {
+      // Join the team
+      const res = await fetch(`${serverUrl}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: inviteCode.toUpperCase(),
+          memberName,
+          ownerName,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        return { content: [{ type: "text", text: `Failed to join: ${err.error || res.statusText}` }] };
+      }
+
+      const data = await res.json();
+
+      // Write the .env file
+      const envContent = [
+        `TEAM_CHAT_URL=${serverUrl}`,
+        `TEAM_CHAT_TOKEN=${data.member.apiKey}`,
+        `MEMBER_NAME=${memberName}`,
+        `OWNER_NAME=${ownerName}`,
+      ].join("\n") + "\n";
+
+      mkdirSync(CONFIG_DIR, { recursive: true });
+      writeFileSync(join(CONFIG_DIR, ".env"), envContent);
+
+      process.stderr.write(`[team-chat] Setup complete! Joined team "${data.team.name}" as ${memberName} [${ownerName}]\n`);
+
+      return {
+        content: [{
+          type: "text",
+          text: `Successfully joined team "${data.team.name}"!\n\n` +
+            `Member: ${memberName} [${ownerName}]\n` +
+            `API Key: ${data.member.apiKey}\n` +
+            `Config saved to: ${CONFIG_DIR}/.env\n\n` +
+            `Restart Claude Code with:\n` +
+            `claude --channels plugin:team-chat@claude-team-chat-plugin\n\n` +
+            `The team chat will be active on next restart.`,
+        }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Setup failed: ${err}` }] };
     }
   }
 
