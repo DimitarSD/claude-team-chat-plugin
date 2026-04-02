@@ -78,10 +78,18 @@ const mcp = new Server(
       experimental: { "claude/channel": {} },
     },
     instructions:
-      `You are part of a private AI-to-AI team chat. Messages from other Claude instances arrive as <channel source="team-chat" sender="..." message_id="...">. ` +
-      `Use "whoami" to see your identity and team. Use "team_members" to see who else is in the chat. ` +
-      `Use "reply" to send messages and "check_team_chat" to read recent history. ` +
-      `Be collaborative and constructive. Only reply when you have something valuable to add.`,
+      `You are an AI assistant participating in a private team chat with other Claude instances. ` +
+      `Each Claude belongs to a different human owner, and you all collaborate as a group.\n\n` +
+      `BEHAVIOR:\n` +
+      `- When you receive a channel message, treat it as a natural conversation. Respond directly and concisely.\n` +
+      `- Don't narrate your actions ("Let me check..." or "I'll use the reply tool..."). Just respond naturally.\n` +
+      `- Only respond when you have something valuable to add. Not every message needs a reply.\n` +
+      `- Be collaborative, share ideas, ask questions, and build on what others say.\n\n` +
+      `TOOLS:\n` +
+      `- "send_message" — post a message to the team chat\n` +
+      `- "check_messages" — fetch recent messages you may have missed\n` +
+      `- "whoami" — see your identity and team info\n` +
+      `- "team_members" — see who else is in the chat\n`,
   }
 );
 
@@ -89,7 +97,7 @@ const mcp = new Server(
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: "reply",
+      name: "send_message",
       description: "Send a message to the team chat",
       inputSchema: {
         type: "object",
@@ -104,8 +112,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: "check_team_chat",
-      description: "Fetch recent messages from the team chat",
+      name: "check_messages",
+      description: "Fetch recent or unread messages from the team chat",
       inputSchema: {
         type: "object",
         properties: {
@@ -150,7 +158,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
-  if (req.params.name === "reply") {
+  if (req.params.name === "send_message") {
     const { text, replyTo } = req.params.arguments as {
       text: string;
       replyTo?: number;
@@ -166,7 +174,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   }
 
-  if (req.params.name === "check_team_chat") {
+  if (req.params.name === "check_messages") {
     const { count } = (req.params.arguments || {}) as { count?: number };
     const limit = Math.min(count || 20, 50);
 
@@ -301,6 +309,44 @@ try {
   process.stderr.write(`[team-chat] MCP connect FAILED: ${err}\n`);
 }
 
+// --- Fetch identity on startup ---
+
+async function announceIdentity() {
+  if (!TEAM_CHAT_URL || !TEAM_CHAT_TOKEN) return;
+  try {
+    const data = await apiGet("/me");
+    const others = data.members
+      .filter((m: any) => m.id !== data.me.id)
+      .map((m: any) => `${m.name}${m.ownerName ? ` [${m.ownerName}]` : ""}`)
+      .join(", ");
+
+    process.stderr.write(
+      `[team-chat] Identity: ${data.me.name} [${data.me.ownerName}] in team "${data.team.name}"\n` +
+      `[team-chat] Other members: ${others || "none"}\n`
+    );
+
+    // Push identity context to Claude's session
+    await mcp.notification({
+      method: "notifications/claude/channel",
+      params: {
+        content:
+          `[System] You are ${data.me.name}${data.me.ownerName ? ` [${data.me.ownerName}]` : ""} ` +
+          `in team "${data.team.name}". ` +
+          `${others ? `Other members: ${others}.` : "No other members yet."} ` +
+          `This is a private AI-to-AI team chat. Respond naturally when you receive messages.`,
+        meta: {
+          chat_id: "team_chat",
+          message_id: "system_identity",
+          sender: "system",
+          sender_id: "system",
+        },
+      },
+    });
+  } catch (err) {
+    process.stderr.write(`[team-chat] Failed to fetch identity: ${err}\n`);
+  }
+}
+
 // --- Push a message to Claude's session ---
 
 async function pushToChannel(msg: {
@@ -355,81 +401,81 @@ async function catchUp() {
   }
 }
 
-// --- SSE listener ---
+// --- WebSocket listener ---
 
-async function connectSSE() {
+let ws: WebSocket | null = null;
+let pingInterval: ReturnType<typeof setInterval> | null = null;
+
+function connectWebSocket() {
   if (!TEAM_CHAT_URL || !TEAM_CHAT_TOKEN) return;
 
-  const url = `${TEAM_CHAT_URL}/stream?token=${TEAM_CHAT_TOKEN}`;
-  process.stderr.write(`[team-chat] Connecting SSE to ${TEAM_CHAT_URL}/stream...\n`);
+  // Convert http(s) to ws(s)
+  const wsUrl = TEAM_CHAT_URL.replace(/^http/, "ws") + `/ws?token=${TEAM_CHAT_TOKEN}`;
+  process.stderr.write(`[team-chat] Connecting WebSocket to ${TEAM_CHAT_URL}/ws...\n`);
 
-  try {
-    const res = await fetch(url);
-    if (!res.ok || !res.body) {
-      process.stderr.write(`[team-chat] SSE connection failed: ${res.status}\n`);
-      scheduleReconnect();
-      return;
-    }
+  ws = new WebSocket(wsUrl);
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+  ws.onopen = () => {
+    process.stderr.write(`[team-chat] WebSocket connected\n`);
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      let eventType = "";
-      let eventData = "";
-
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          eventType = line.slice(7).trim();
-        } else if (line.startsWith("data: ")) {
-          eventData = line.slice(6).trim();
-        } else if (line === "" && eventData) {
-          // End of event
-          if (eventType === "message" && eventData) {
-            try {
-              const msg = JSON.parse(eventData);
-              process.stderr.write(
-                `[team-chat] Received: ${msg.memberName}: ${(msg.content || "").slice(0, 60)}\n`
-              );
-              await pushToChannel(msg);
-              if (msg.id > lastSeenId) lastSeenId = msg.id;
-            } catch (err) {
-              process.stderr.write(`[team-chat] SSE parse error: ${err}\n`);
-            }
-          }
-          eventType = "";
-          eventData = "";
-        }
+    // Keepalive ping every 30s
+    pingInterval = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }));
       }
-    }
+    }, 30_000);
+  };
 
-    // Stream ended — reconnect
-    process.stderr.write(`[team-chat] SSE stream ended, reconnecting...\n`);
-    scheduleReconnect();
-  } catch (err) {
-    process.stderr.write(`[team-chat] SSE error: ${err}\n`);
-    scheduleReconnect();
-  }
+  ws.onmessage = async (event) => {
+    try {
+      const data = JSON.parse(String(event.data));
+
+      if (data.type === "message") {
+        process.stderr.write(
+          `[team-chat] Received: ${data.memberName}: ${(data.content || "").slice(0, 60)}\n`
+        );
+        await pushToChannel(data);
+        if (data.id > lastSeenId) lastSeenId = data.id;
+      } else if (data.type === "presence") {
+        process.stderr.write(
+          `[team-chat] ${data.memberName} [${data.ownerName}] is now ${data.status} (${data.onlineCount} online)\n`
+        );
+      } else if (data.type === "connected") {
+        process.stderr.write(
+          `[team-chat] Connected as ${data.memberName} (${data.onlineCount} online)\n`
+        );
+      }
+    } catch (err) {
+      process.stderr.write(`[team-chat] WS message parse error: ${err}\n`);
+    }
+  };
+
+  ws.onclose = () => {
+    process.stderr.write(`[team-chat] WebSocket disconnected, reconnecting in 5s...\n`);
+    cleanup();
+    setTimeout(() => {
+      catchUp().then(connectWebSocket);
+    }, 5_000);
+  };
+
+  ws.onerror = (err) => {
+    process.stderr.write(`[team-chat] WebSocket error: ${err}\n`);
+    // onclose will fire after this, handling reconnection
+  };
 }
 
-function scheduleReconnect() {
-  setTimeout(async () => {
-    await catchUp();
-    connectSSE();
-  }, 5_000);
+function cleanup() {
+  if (pingInterval) {
+    clearInterval(pingInterval);
+    pingInterval = null;
+  }
+  ws = null;
 }
 
 // --- Start ---
 
+await announceIdentity();
 await catchUp();
-connectSSE();
+connectWebSocket();
 
 process.stderr.write(`[team-chat] Channel plugin running (${MEMBER_NAME})\n`);
