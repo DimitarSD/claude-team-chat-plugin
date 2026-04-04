@@ -89,7 +89,12 @@ const mcp = new Server(
       `- "send_message" — post a message to the team chat\n` +
       `- "check_messages" — fetch recent messages you may have missed\n` +
       `- "whoami" — see your identity and team info\n` +
-      `- "team_members" — see who else is in the chat\n`,
+      `- "team_members" — see who else is in the chat\n` +
+      `- "online_members" — see who is currently connected\n` +
+      `- "invite_member" — invite someone to the team by their Claude name\n` +
+      `- "create_team" — create a new team\n` +
+      `- "join_team" — join a team with an invite code\n` +
+      `- "leave_team" — leave the current team\n`,
   }
 );
 
@@ -139,6 +144,49 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: "object",
         properties: {},
       },
+    },
+    {
+      name: "online_members",
+      description: "See which team members are currently connected and online",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "invite_member",
+      description: "Invite a user to the team by their Claude name",
+      inputSchema: {
+        type: "object",
+        properties: {
+          claudeName: { type: "string", description: "The Claude name of the user to invite" },
+        },
+        required: ["claudeName"],
+      },
+    },
+    {
+      name: "create_team",
+      description: "Create a new team",
+      inputSchema: {
+        type: "object",
+        properties: {
+          teamName: { type: "string", description: "Name for the new team" },
+        },
+        required: ["teamName"],
+      },
+    },
+    {
+      name: "join_team",
+      description: "Join an existing team using an invite code",
+      inputSchema: {
+        type: "object",
+        properties: {
+          inviteCode: { type: "string", description: "The invite code (e.g. ABCD1234)" },
+        },
+        required: ["inviteCode"],
+      },
+    },
+    {
+      name: "leave_team",
+      description: "Leave the current team",
+      inputSchema: { type: "object", properties: {} },
     },
     {
       name: "setup_team_chat",
@@ -236,6 +284,93 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       }
     } catch (err) {
       return { content: [{ type: "text", text: `Failed to fetch info: ${err}` }] };
+    }
+  }
+
+  if (req.params.name === "online_members") {
+    try {
+      const data = await apiGet("/online");
+      const allOnline: string[] = [];
+      for (const m of data as any[]) {
+        const owner = m.ownerName ? ` [${m.ownerName}]` : "";
+        allOnline.push(`${m.memberName}${owner}`);
+      }
+      if (allOnline.length === 0) {
+        return { content: [{ type: "text", text: "No one is currently online." }] };
+      }
+      return { content: [{ type: "text", text: `Currently online (${allOnline.length}):\n${allOnline.map(n => `- ${n}`).join("\n")}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed to check online members: ${err}` }] };
+    }
+  }
+
+  if (req.params.name === "invite_member") {
+    const { claudeName } = req.params.arguments as { claudeName: string };
+    try {
+      const meData = await apiGet("/me");
+      await apiPost("/invitations", { teamId: meData.team.id, claudeName });
+      return { content: [{ type: "text", text: `Invitation sent to ${claudeName}` }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed to invite: ${err.message || err}` }] };
+    }
+  }
+
+  if (req.params.name === "create_team") {
+    const { teamName } = req.params.arguments as { teamName: string };
+    try {
+      const data = await apiPost("/teams", {
+        teamName,
+        memberName: MEMBER_NAME,
+        ownerName: OWNER_NAME,
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `Team "${data.team.name}" created!\n` +
+            `Team ID: ${data.team.id}\n` +
+            `Invite codes: ${data.inviteCodes.join(", ")}\n` +
+            `Your API key: ${data.member.apiKey}`,
+        }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed to create team: ${err.message || err}` }] };
+    }
+  }
+
+  if (req.params.name === "join_team") {
+    const { inviteCode } = req.params.arguments as { inviteCode: string };
+    try {
+      const data = await apiPost("/join", {
+        code: inviteCode.toUpperCase(),
+        memberName: MEMBER_NAME,
+        ownerName: OWNER_NAME,
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `Joined team "${data.team.name}"!\n` +
+            `Your API key: ${data.member.apiKey}\n\n` +
+            `Note: To use this team, update your TEAM_CHAT_TOKEN in ~/.claude/channels/team-chat/.env and restart.`,
+        }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Failed to join: ${err.message || err}` }] };
+    }
+  }
+
+  if (req.params.name === "leave_team") {
+    try {
+      const meData = await apiGet("/me");
+      return {
+        content: [{
+          type: "text",
+          text: `You are ${meData.me.name} [${meData.me.ownerName}] in team "${meData.team.name}".\n\n` +
+            `To leave this team, remove or clear the file ~/.claude/channels/team-chat/.env and restart Claude Code.\n` +
+            `Warning: this will disconnect you from the team chat.`,
+        }],
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Failed: ${err}` }] };
     }
   }
 
