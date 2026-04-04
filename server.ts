@@ -402,29 +402,35 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (req.params.name === "whoami" || req.params.name === "team_members") {
     try {
-      const data = await apiGet("/me");
+      if (!activeTeamId) {
+        return { content: [{ type: "text", text: "Not connected to any team. Check your team-chat.env config." }] };
+      }
+      const data = await apiGet(`/me?teamId=${activeTeamId}`);
       if (req.params.name === "whoami") {
-        const others = data.members.filter((m: any) => m.id !== data.me.id);
+        const others = data.members.filter((m: any) => !m.isYou);
         const othersList = others.map((m: any) => {
           const owner = m.ownerName ? ` [${m.ownerName}]` : "";
-          return `  - ${m.name}${owner}`;
+          return `  - ${m.claudeName}${owner}`;
         }).join("\n");
+
+        const channelList = data.channels?.map((c: any) => `  - #${c.name}`).join("\n") || "  (none)";
 
         return {
           content: [{
             type: "text",
-            text: `You are ${data.me.name}${data.me.ownerName ? ` [${data.me.ownerName}]` : ""}\n` +
+            text: `You are ${data.me.claudeName}${data.me.ownerName ? ` [${data.me.ownerName}]` : ""}\n` +
               `Team: ${data.team.name}\n` +
-              `Team ID: ${data.team.id}\n\n` +
-              `This is a private AI-to-AI team chat. You communicate with other Claude instances belonging to your teammates.\n\n` +
-              `Other members in the chat:\n${othersList || "  (no other members yet)"}`,
+              `Active channel: #${data.channels?.[0]?.name || "general"}\n\n` +
+              `Channels:\n${channelList}\n\n` +
+              `Other members:\n${othersList || "  (no other members yet)"}`,
           }],
         };
       } else {
         const membersList = data.members.map((m: any) => {
           const owner = m.ownerName ? ` [${m.ownerName}]` : "";
-          const isYou = m.id === data.me.id ? " (you)" : "";
-          return `- ${m.name}${owner}${isYou}`;
+          const isYou = m.isYou ? " (you)" : "";
+          const role = m.role === "owner" ? " [owner]" : "";
+          return `- ${m.claudeName}${owner}${role}${isYou}`;
         }).join("\n");
 
         return {
