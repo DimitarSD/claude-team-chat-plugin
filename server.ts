@@ -44,19 +44,21 @@ if (!loadEnvFile(localEnv)) {
 }
 
 const TEAM_CHAT_URL = process.env.TEAM_CHAT_URL;
-const TEAM_CHAT_TOKEN = process.env.TEAM_CHAT_TOKEN;
+const TEAM_CHAT_TOKEN = process.env.TEAM_CHAT_TOKEN; // User token (ut_...)
 const MEMBER_NAME = process.env.MEMBER_NAME || "Claude";
 const OWNER_NAME = process.env.OWNER_NAME || "";
-const DISPLAY_NAME = OWNER_NAME ? `${MEMBER_NAME} [${OWNER_NAME}]` : MEMBER_NAME;
 
 if (!TEAM_CHAT_URL || !TEAM_CHAT_TOKEN) {
   process.stderr.write(
     `[team-chat] ERROR: Missing TEAM_CHAT_URL or TEAM_CHAT_TOKEN.\n` +
-    `Configure in ${CONFIG_DIR}/.env\n`
+    `Configure in ${CONFIG_DIR}/.env or .team-chat.env\n`
   );
 }
 
 let lastSeenId = 0;
+let activeTeamId: string | null = null;
+let activeChannelId: string | null = null;
+let activeTeamName: string | null = null;
 
 // --- API helpers ---
 
@@ -352,7 +354,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
 
     try {
-      const msg = await apiPost("/messages", { content: text, replyTo });
+      if (!activeChannelId || !activeTeamId) {
+        return { content: [{ type: "text", text: "Not connected to any team. Use whoami or check your config." }] };
+      }
+      const msg = await apiPost("/messages", { channelId: activeChannelId, teamId: activeTeamId, content: text, replyTo });
       process.stderr.write(`[team-chat] Sent message #${msg.id}: ${text.slice(0, 60)}...\n`);
       return { content: [{ type: "text", text: `Message sent (id: ${msg.id})` }] };
     } catch (err) {
@@ -366,7 +371,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const limit = Math.min(count || 20, 50);
 
     try {
-      const data = await apiGet(`/messages?since=0&limit=${limit}`);
+      if (!activeChannelId) return { content: [{ type: "text", text: "Not connected to any channel." }] };
+      const data = await apiGet(`/messages?channelId=${activeChannelId}&since=0&limit=${limit}`);
       if (!data.messages?.length) {
         return { content: [{ type: "text", text: "No messages in the team chat yet." }] };
       }
@@ -786,34 +792,50 @@ try {
 async function announceIdentity() {
   if (!TEAM_CHAT_URL || !TEAM_CHAT_TOKEN) return;
   try {
-    const data = await apiGet("/me");
-    const others = data.members
-      .filter((m: any) => m.id !== data.me.id)
-      .map((m: any) => `${m.name}${m.ownerName ? ` [${m.ownerName}]` : ""}`)
-      .join(", ");
+    // Get user's teams
+    const teams = await apiGet("/teams/me");
+    if (!teams.length) {
+      process.stderr.write(`[team-chat] Not a member of any team yet\n`);
+      return;
+    }
+
+    // Use first team and its #general channel
+    const team = teams[0];
+    activeTeamId = team.id;
+    activeTeamName = team.name;
+    activeChannelId = team.channels?.[0]?.id || null;
 
     process.stderr.write(
-      `[team-chat] Identity: ${data.me.name} [${data.me.ownerName}] in team "${data.team.name}"\n` +
-      `[team-chat] Other members: ${others || "none"}\n`
+      `[team-chat] Team: "${team.name}" (${team.id})\n` +
+      `[team-chat] Channel: #${team.channels?.[0]?.name || "general"} (${activeChannelId})\n` +
+      `[team-chat] Members: ${team.memberCount}\n`
     );
 
-    // Push identity context to Claude's session
-    await mcp.notification({
-      method: "notifications/claude/channel",
-      params: {
-        content:
-          `[System] You are ${data.me.name}${data.me.ownerName ? ` [${data.me.ownerName}]` : ""} ` +
-          `in team "${data.team.name}". ` +
-          `${others ? `Other members: ${others}.` : "No other members yet."} ` +
-          `This is a private AI-to-AI team chat. Respond naturally when you receive messages.`,
-        meta: {
-          chat_id: "team_chat",
-          message_id: "system_identity",
-          sender: "system",
-          sender_id: "system",
+    // Get detailed member info
+    if (activeTeamId) {
+      const data = await apiGet(`/me?teamId=${activeTeamId}`);
+      const others = data.members
+        .filter((m: any) => !m.isYou)
+        .map((m: any) => `${m.claudeName}${m.ownerName ? ` [${m.ownerName}]` : ""}`)
+        .join(", ");
+
+      await mcp.notification({
+        method: "notifications/claude/channel",
+        params: {
+          content:
+            `[System] You are ${data.me.claudeName}${data.me.ownerName ? ` [${data.me.ownerName}]` : ""} ` +
+            `in team "${data.team.name}" on channel #${team.channels?.[0]?.name || "general"}. ` +
+            `${others ? `Other members: ${others}.` : "No other members yet."} ` +
+            `This is a private AI-to-AI team chat. Respond naturally when you receive messages.`,
+          meta: {
+            chat_id: "team_chat",
+            message_id: "system_identity",
+            sender: "system",
+            sender_id: "system",
+          },
         },
-      },
-    });
+      });
+    }
   } catch (err) {
     process.stderr.write(`[team-chat] Failed to fetch identity: ${err}\n`);
   }
@@ -823,15 +845,19 @@ async function announceIdentity() {
 
 async function pushToChannel(msg: {
   id: number;
-  memberName: string;
+  claudeName?: string;
+  memberName?: string;
   ownerName?: string;
-  memberId: string;
+  userId?: string;
+  memberId?: string;
   content: string;
   replyTo?: number | null;
   createdAt: string;
 }) {
   try {
-    const sender = msg.ownerName ? `${msg.memberName} [${msg.ownerName}]` : msg.memberName;
+    const name = msg.claudeName || msg.memberName || "Unknown";
+    const sender = msg.ownerName ? `${name} [${msg.ownerName}]` : name;
+    const senderId = msg.userId || msg.memberId || "unknown";
     const replyInfo = msg.replyTo ? ` (replying to #${msg.replyTo})` : "";
     await mcp.notification({
       method: "notifications/claude/channel",
@@ -840,8 +866,8 @@ async function pushToChannel(msg: {
         meta: {
           chat_id: "team_chat",
           message_id: String(msg.id),
-          sender: msg.memberName,
-          sender_id: msg.memberId,
+          sender: name,
+          sender_id: senderId,
           ts: msg.createdAt,
           ...(msg.replyTo ? { reply_to: String(msg.replyTo) } : {}),
         },
@@ -858,7 +884,8 @@ async function catchUp() {
   if (!TEAM_CHAT_URL || !TEAM_CHAT_TOKEN) return;
 
   try {
-    const data = await apiGet(`/messages?since=${lastSeenId}&limit=20`);
+    if (!activeChannelId) return;
+    const data = await apiGet(`/messages?channelId=${activeChannelId}&since=${lastSeenId}&limit=20`);
     if (data.messages?.length) {
       process.stderr.write(`[team-chat] Catching up: ${data.messages.length} new message(s)\n`);
       for (const msg of data.messages) {
@@ -882,7 +909,11 @@ function connectWebSocket() {
   if (!TEAM_CHAT_URL || !TEAM_CHAT_TOKEN) return;
 
   // Convert http(s) to ws(s)
-  const wsUrl = TEAM_CHAT_URL.replace(/^http/, "ws") + `/ws?token=${TEAM_CHAT_TOKEN}`;
+  if (!activeTeamId) {
+    process.stderr.write(`[team-chat] No active team — skipping WebSocket\n`);
+    return;
+  }
+  const wsUrl = TEAM_CHAT_URL.replace(/^http/, "ws") + `/ws?token=${TEAM_CHAT_TOKEN}&teamId=${activeTeamId}`;
   process.stderr.write(`[team-chat] Connecting WebSocket to ${TEAM_CHAT_URL}/ws...\n`);
 
   ws = new WebSocket(wsUrl);
