@@ -37,10 +37,13 @@ function loadEnvFile(path: string): boolean {
   }
 }
 
-// Priority: local project file > global config
-const localEnv = join(process.cwd(), ".team-chat.env");
-if (!loadEnvFile(localEnv)) {
-  loadEnvFile(join(CONFIG_DIR, ".env"));
+// Priority: local .team-chat.env > local team-chat.env (no dot) > global config
+const localEnvDot = join(process.cwd(), ".team-chat.env");
+const localEnvNoDot = join(process.cwd(), "team-chat.env");
+if (!loadEnvFile(localEnvDot)) {
+  if (!loadEnvFile(localEnvNoDot)) {
+    loadEnvFile(join(CONFIG_DIR, ".env"));
+  }
 }
 
 const TEAM_CHAT_URL = process.env.TEAM_CHAT_URL;
