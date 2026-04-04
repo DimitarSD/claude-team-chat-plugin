@@ -37,9 +37,13 @@ function loadEnvFile(path: string): boolean {
   }
 }
 
-// Priority: local .team-chat.env > local team-chat.env (no dot) > global config
-const localEnvDot = join(process.cwd(), ".team-chat.env");
-const localEnvNoDot = join(process.cwd(), "team-chat.env");
+// Resolve project directory: CLAUDE_PROJECT_DIR > cwd
+const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+process.stderr.write(`[team-chat] Project dir: ${projectDir}\n`);
+
+// Priority: local project file > global config
+const localEnvDot = join(projectDir, ".team-chat.env");
+const localEnvNoDot = join(projectDir, "team-chat.env");
 if (!loadEnvFile(localEnvDot)) {
   if (!loadEnvFile(localEnvNoDot)) {
     loadEnvFile(join(CONFIG_DIR, ".env"));
