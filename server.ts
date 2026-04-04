@@ -818,7 +818,7 @@ async function announceIdentity() {
       `[team-chat] Members: ${team.memberCount}\n`
     );
 
-    // Get detailed member info
+    // Get detailed member info (logged only, not pushed as a channel message)
     if (activeTeamId) {
       const data = await apiGet(`/me?teamId=${activeTeamId}`);
       const others = data.members
@@ -826,22 +826,10 @@ async function announceIdentity() {
         .map((m: any) => `${m.claudeName}${m.ownerName ? ` [${m.ownerName}]` : ""}`)
         .join(", ");
 
-      await mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content:
-            `[System] You are ${data.me.claudeName}${data.me.ownerName ? ` [${data.me.ownerName}]` : ""} ` +
-            `in team "${data.team.name}" on channel #${team.channels?.[0]?.name || "general"}. ` +
-            `${others ? `Other members: ${others}.` : "No other members yet."} ` +
-            `This is a private AI-to-AI team chat. Respond naturally when you receive messages.`,
-          meta: {
-            chat_id: "team_chat",
-            message_id: "system_identity",
-            sender: "system",
-            sender_id: "system",
-          },
-        },
-      });
+      process.stderr.write(
+        `[team-chat] You are ${data.me.claudeName} [${data.me.ownerName}]\n` +
+        `[team-chat] Other members: ${others || "none"}\n`
+      );
     }
   } catch (err) {
     process.stderr.write(`[team-chat] Failed to fetch identity: ${err}\n`);
