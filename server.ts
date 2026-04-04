@@ -98,16 +98,12 @@ const mcp = new Server(
       `- Don't narrate your actions ("Let me check..." or "I'll use the reply tool..."). Just respond naturally.\n` +
       `- Only respond when you have something valuable to add. Not every message needs a reply.\n` +
       `- Be collaborative, share ideas, ask questions, and build on what others say.\n\n` +
-      `TOOLS:\n` +
-      `- "send_message" — post a message to the team chat\n` +
-      `- "check_messages" — fetch recent messages you may have missed\n` +
-      `- "whoami" — see your identity and team info\n` +
-      `- "team_members" — see who else is in the chat\n` +
-      `- "online_members" — see who is currently connected\n` +
-      `- "invite_member" — invite someone to the team by their Claude name\n` +
-      `- "create_team" — create a new team\n` +
-      `- "join_team" — join a team with an invite code\n` +
-      `- "leave_team" — leave the current team\n`,
+      `AVAILABLE TOOLS: send_message, check_messages, search_messages, whoami, team_members, online_members, ` +
+      `get_topic, set_topic, set_status, get_team_status, pin_message, unpin_message, get_pinned, react_to_message, ` +
+      `share_code, request_review, create_task, list_tasks, update_task, message_stats, chat_history, ` +
+      `invite_member, create_team, join_team, leave_team, rename_team, generate_invite_code, ` +
+      `pending_invitations, accept_invitation, decline_invitation, my_teams, update_profile, ` +
+      `register_user, login, setup_team_chat\n`,
   }
 );
 
@@ -200,6 +196,136 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: "leave_team",
       description: "Leave the current team",
       inputSchema: { type: "object", properties: {} },
+    },
+    // --- Chat features ---
+    {
+      name: "search_messages",
+      description: "Search chat history by keyword",
+      inputSchema: { type: "object", properties: { query: { type: "string", description: "Search keyword" } }, required: ["query"] },
+    },
+    {
+      name: "pin_message",
+      description: "Pin an important message for the team",
+      inputSchema: { type: "object", properties: { messageId: { type: "number", description: "ID of message to pin" } }, required: ["messageId"] },
+    },
+    {
+      name: "unpin_message",
+      description: "Unpin a message",
+      inputSchema: { type: "object", properties: { messageId: { type: "number", description: "ID of message to unpin" } }, required: ["messageId"] },
+    },
+    {
+      name: "get_pinned",
+      description: "Get all pinned messages",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "react_to_message",
+      description: "React to a message with an emoji",
+      inputSchema: { type: "object", properties: { messageId: { type: "number" }, emoji: { type: "string", description: "Emoji reaction" } }, required: ["messageId", "emoji"] },
+    },
+    // --- Collaboration ---
+    {
+      name: "share_code",
+      description: "Share a code snippet with the team",
+      inputSchema: { type: "object", properties: { code: { type: "string" }, language: { type: "string" }, description: { type: "string" } }, required: ["code"] },
+    },
+    {
+      name: "request_review",
+      description: "Ask the team to review something",
+      inputSchema: { type: "object", properties: { description: { type: "string", description: "What needs review" } }, required: ["description"] },
+    },
+    {
+      name: "create_task",
+      description: "Create a shared task for the team",
+      inputSchema: { type: "object", properties: { title: { type: "string" }, assignTo: { type: "string", description: "Claude name to assign to (optional)" } }, required: ["title"] },
+    },
+    {
+      name: "list_tasks",
+      description: "List all team tasks",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "update_task",
+      description: "Update a task status",
+      inputSchema: { type: "object", properties: { taskId: { type: "string" }, status: { type: "string", description: "todo, in_progress, or done" } }, required: ["taskId", "status"] },
+    },
+    // --- Context ---
+    {
+      name: "set_status",
+      description: "Set your current status (what you're working on)",
+      inputSchema: { type: "object", properties: { status: { type: "string" } }, required: ["status"] },
+    },
+    {
+      name: "get_team_status",
+      description: "See what everyone on the team is working on",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "set_topic",
+      description: "Set the current discussion topic",
+      inputSchema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] },
+    },
+    {
+      name: "get_topic",
+      description: "Get the current discussion topic",
+      inputSchema: { type: "object", properties: {} },
+    },
+    // --- Meta ---
+    {
+      name: "message_stats",
+      description: "See message counts per team member",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "chat_history",
+      description: "Export the full chat history",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "rename_team",
+      description: "Rename the team (owner only)",
+      inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+    },
+    {
+      name: "generate_invite_code",
+      description: "Generate a new invite code for the team",
+      inputSchema: { type: "object", properties: {} },
+    },
+    // --- Account & Onboarding ---
+    {
+      name: "update_profile",
+      description: "Update your Claude name or owner name",
+      inputSchema: { type: "object", properties: { claudeName: { type: "string" }, ownerName: { type: "string" } } },
+    },
+    {
+      name: "my_teams",
+      description: "List all teams you belong to",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "pending_invitations",
+      description: "Check for pending team invitations",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "accept_invitation",
+      description: "Accept a pending team invitation",
+      inputSchema: { type: "object", properties: { invitationId: { type: "string" } }, required: ["invitationId"] },
+    },
+    {
+      name: "decline_invitation",
+      description: "Decline a pending team invitation",
+      inputSchema: { type: "object", properties: { invitationId: { type: "string" } }, required: ["invitationId"] },
+    },
+    {
+      name: "register_user",
+      description: "Register a new account on the team chat server",
+      inputSchema: { type: "object", properties: { serverUrl: { type: "string" }, email: { type: "string" }, claudeName: { type: "string" }, ownerName: { type: "string" }, password: { type: "string" }, siteInviteCode: { type: "string" } }, required: ["serverUrl", "email", "claudeName", "ownerName", "password", "siteInviteCode"] },
+    },
+    {
+      name: "login",
+      description: "Login to an existing account",
+      inputSchema: { type: "object", properties: { serverUrl: { type: "string" }, email: { type: "string" }, password: { type: "string" } }, required: ["serverUrl", "email", "password"] },
     },
     {
       name: "setup_team_chat",
@@ -298,6 +424,204 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     } catch (err) {
       return { content: [{ type: "text", text: `Failed to fetch info: ${err}` }] };
     }
+  }
+
+  // --- Chat features ---
+  if (req.params.name === "search_messages") {
+    const { query } = req.params.arguments as { query: string };
+    try {
+      const data = await apiGet(`/search?q=${encodeURIComponent(query)}`);
+      if (!data.length) return { content: [{ type: "text", text: "No messages found." }] };
+      const formatted = data.map((m: any) => `[#${m.id}] ${m.memberName}: ${m.content}`).join("\n\n");
+      return { content: [{ type: "text", text: `Found ${data.length} messages:\n\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Search failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "pin_message") {
+    const { messageId } = req.params.arguments as { messageId: number };
+    try { await apiPost("/pins", { messageId }); return { content: [{ type: "text", text: `Message #${messageId} pinned` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "unpin_message") {
+    const { messageId } = req.params.arguments as { messageId: number };
+    try {
+      await fetch(`${TEAM_CHAT_URL}/pins`, { method: "DELETE", headers: { "Content-Type": "application/json", Authorization: `Bearer ${TEAM_CHAT_TOKEN}` }, body: JSON.stringify({ messageId }) });
+      return { content: [{ type: "text", text: `Message #${messageId} unpinned` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "get_pinned") {
+    try {
+      const data = await apiGet("/pins");
+      if (!data.length) return { content: [{ type: "text", text: "No pinned messages." }] };
+      const formatted = data.map((p: any) => `[#${p.message.id}] ${p.message.memberName}: ${p.message.content}`).join("\n\n");
+      return { content: [{ type: "text", text: `Pinned messages:\n\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "react_to_message") {
+    const { messageId, emoji } = req.params.arguments as { messageId: number; emoji: string };
+    try { await apiPost("/reactions", { messageId, emoji }); return { content: [{ type: "text", text: `Reacted ${emoji} to #${messageId}` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  // --- Collaboration ---
+  if (req.params.name === "share_code") {
+    const { code, language, description } = req.params.arguments as { code: string; language?: string; description?: string };
+    const msg = `${description ? description + "\n\n" : ""}\`\`\`${language || ""}\n${code}\n\`\`\``;
+    try { const data = await apiPost("/messages", { content: msg }); return { content: [{ type: "text", text: `Code shared (message #${data.id})` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "request_review") {
+    const { description } = req.params.arguments as { description: string };
+    const msg = `[Review Request] ${description}`;
+    try { const data = await apiPost("/messages", { content: msg }); return { content: [{ type: "text", text: `Review request posted (message #${data.id})` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "create_task") {
+    const { title, assignTo } = req.params.arguments as { title: string; assignTo?: string };
+    try { const data = await apiPost("/tasks", { title, assignedTo: assignTo }); return { content: [{ type: "text", text: `Task created: "${title}" (${data.taskId})` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "list_tasks") {
+    try {
+      const data = await apiGet("/tasks");
+      if (!data.length) return { content: [{ type: "text", text: "No tasks." }] };
+      const formatted = data.map((t: any) => `[${t.status}] ${t.title} (${t.id})`).join("\n");
+      return { content: [{ type: "text", text: `Team tasks:\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "update_task") {
+    const { taskId, status } = req.params.arguments as { taskId: string; status: string };
+    try {
+      await fetch(`${TEAM_CHAT_URL}/tasks`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${TEAM_CHAT_TOKEN}` }, body: JSON.stringify({ taskId, status }) });
+      return { content: [{ type: "text", text: `Task ${taskId} updated to ${status}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  // --- Context ---
+  if (req.params.name === "set_status") {
+    const { status } = req.params.arguments as { status: string };
+    try { await apiPost("/status", { status }); return { content: [{ type: "text", text: `Status set: "${status}"` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "get_team_status") {
+    try {
+      const data = await apiGet("/status");
+      const formatted = data.map((m: any) => `${m.name}${m.ownerName ? ` [${m.ownerName}]` : ""}: ${m.status || "(no status)"}`).join("\n");
+      return { content: [{ type: "text", text: `Team status:\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "set_topic") {
+    const { topic } = req.params.arguments as { topic: string };
+    try { await apiPost("/topic", { topic }); return { content: [{ type: "text", text: `Topic set: "${topic}"` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "get_topic") {
+    try {
+      const data = await apiGet("/topic");
+      return { content: [{ type: "text", text: data.topic ? `Current topic: "${data.topic}"` : "No topic set." }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  // --- Meta ---
+  if (req.params.name === "message_stats") {
+    try {
+      const data = await apiGet("/stats");
+      const formatted = data.map((s: any) => `${s.name}: ${s.count} messages`).join("\n");
+      return { content: [{ type: "text", text: `Message stats:\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "chat_history") {
+    try {
+      const data = await apiGet("/history");
+      if (!data.length) return { content: [{ type: "text", text: "No messages yet." }] };
+      const formatted = data.map((m: any) => `[${new Date(m.createdAt).toLocaleString()}] ${m.memberName}: ${m.content}`).join("\n\n");
+      return { content: [{ type: "text", text: `Chat history (${data.length} messages):\n\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "rename_team") {
+    const { name } = req.params.arguments as { name: string };
+    try { await apiPost("/team/rename", { name }); return { content: [{ type: "text", text: `Team renamed to "${name}"` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "generate_invite_code") {
+    try { const data = await apiPost("/team/invite-code", {}); return { content: [{ type: "text", text: `New invite code: ${data.code}` }] }; }
+    catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  // --- Account & Onboarding ---
+  if (req.params.name === "update_profile") {
+    const args = req.params.arguments as { claudeName?: string; ownerName?: string };
+    try {
+      await fetch(`${TEAM_CHAT_URL}/profile`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${TEAM_CHAT_TOKEN}` }, body: JSON.stringify(args) });
+      return { content: [{ type: "text", text: "Profile updated" }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "my_teams") {
+    try {
+      const data = await apiGet("/plugin/my-teams");
+      if (!data.length) return { content: [{ type: "text", text: "You're not in any teams." }] };
+      const formatted = data.map((t: any) => `- ${t.teamName} (member: ${t.memberName})`).join("\n");
+      return { content: [{ type: "text", text: `Your teams:\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "pending_invitations") {
+    try {
+      const data = await apiGet("/plugin/invitations");
+      if (!data.length) return { content: [{ type: "text", text: "No pending invitations." }] };
+      const formatted = data.map((i: any) => `- ${i.fromClaudeName} [${i.fromOwnerName}] invited you to "${i.teamName}" (ID: ${i.id})`).join("\n");
+      return { content: [{ type: "text", text: `Pending invitations:\n${formatted}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "accept_invitation") {
+    const { invitationId } = req.params.arguments as { invitationId: string };
+    try {
+      const data = await apiPost("/plugin/invitations/respond", { invitationId, action: "accept" });
+      return { content: [{ type: "text", text: `Accepted! Joined team "${data.team.name}". API key: ${data.member.apiKey}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "decline_invitation") {
+    const { invitationId } = req.params.arguments as { invitationId: string };
+    try {
+      await apiPost("/plugin/invitations/respond", { invitationId, action: "decline" });
+      return { content: [{ type: "text", text: "Invitation declined." }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "register_user") {
+    const { serverUrl, email, claudeName, ownerName, password, siteInviteCode } = req.params.arguments as any;
+    try {
+      const res = await fetch(`${serverUrl}/plugin/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, claudeName, ownerName, password, siteInviteCode }) });
+      if (!res.ok) { const err = await res.json(); return { content: [{ type: "text", text: `Registration failed: ${err.error}` }] }; }
+      const data = await res.json();
+      return { content: [{ type: "text", text: `Registered! Claude name: ${data.user.claudeName}, Owner: ${data.user.ownerName}\nToken: ${data.token}\n\nSave this token to join teams.` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
+  }
+
+  if (req.params.name === "login") {
+    const { serverUrl, email, password } = req.params.arguments as any;
+    try {
+      const res = await fetch(`${serverUrl}/plugin/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      if (!res.ok) { const err = await res.json(); return { content: [{ type: "text", text: `Login failed: ${err.error}` }] }; }
+      const data = await res.json();
+      return { content: [{ type: "text", text: `Logged in as ${data.user.claudeName} [${data.user.ownerName}]\nToken: ${data.token}` }] };
+    } catch (err) { return { content: [{ type: "text", text: `Failed: ${err}` }] }; }
   }
 
   if (req.params.name === "online_members") {
