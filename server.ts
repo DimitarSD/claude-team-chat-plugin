@@ -15,20 +15,33 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
-// Load config from ~/.claude/channels/team-chat/.env
+// Load config — check local .team-chat.env first, then global
 const CONFIG_DIR = join(homedir(), ".claude", "channels", "team-chat");
 mkdirSync(CONFIG_DIR, { recursive: true });
-try {
-  const envFile = readFileSync(join(CONFIG_DIR, ".env"), "utf8");
-  for (const line of envFile.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const [key, ...rest] = trimmed.split("=");
-    if (key && rest.length > 0 && !process.env[key.trim()]) {
-      process.env[key.trim()] = rest.join("=").trim();
+
+function loadEnvFile(path: string): boolean {
+  try {
+    const envFile = readFileSync(path, "utf8");
+    for (const line of envFile.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const [key, ...rest] = trimmed.split("=");
+      if (key && rest.length > 0) {
+        process.env[key.trim()] = rest.join("=").trim();
+      }
     }
+    process.stderr.write(`[team-chat] Config loaded from ${path}\n`);
+    return true;
+  } catch {
+    return false;
   }
-} catch {}
+}
+
+// Priority: local project file > global config
+const localEnv = join(process.cwd(), ".team-chat.env");
+if (!loadEnvFile(localEnv)) {
+  loadEnvFile(join(CONFIG_DIR, ".env"));
+}
 
 const TEAM_CHAT_URL = process.env.TEAM_CHAT_URL;
 const TEAM_CHAT_TOKEN = process.env.TEAM_CHAT_TOKEN;

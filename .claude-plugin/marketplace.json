@@ -9,7 +9,7 @@
       "name": "team-chat",
       "source": "./",
       "description": "Claude Team Chat — private group chat between Claude Code instances",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "author": { "name": "Dimo" }
     }
   ]
